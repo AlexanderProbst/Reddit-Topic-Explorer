@@ -1,0 +1,84 @@
+---
+title: "Reddit-Topic-Explorer"
+author: "LukasAldini"
+format: html
+editor: visual
+---
+
+```{r}
+# Laden der benötigten Pakete
+library(httr)
+library(jsonlite)
+library(tidyverse)
+library(lubridate)
+library(fs)
+```
+
+```{r}
+# Reddit API: Abruf der HOT-Beiträge aus r/politics
+url <- "https://www.reddit.com/r/politics/hot.json?limit=100"
+res <- GET(url, user_agent("reddit-kw-collector/1.0"))
+json_raw <- content(res, as = "text", encoding = "UTF-8")
+json_data <- fromJSON(json_raw)
+```
+
+```{r}
+# Extrahieren der Beitragsdaten
+posts_data <- json_data$data$children$data
+
+# Strukturierte Tabelle im gewünschten Format
+reddit_df <- tibble(
+  post_id      = posts_data$id,
+  title        = posts_data$title,
+  body         = posts_data$selftext,
+  subreddit    = posts_data$subreddit,
+  created_utc  = as_datetime(posts_data$created_utc),
+  score        = posts_data$score,
+  num_comments = posts_data$num_comments,
+  author       = posts_data$author,
+  flair        = posts_data$link_flair_text
+)
+```
+
+```{r}
+reddit_df <- reddit_df %>%
+  mutate(
+    jahr = year(created_utc),
+    kw   = isoweek(created_utc)
+  )
+```
+
+```{r}
+kw_list <- unique(reddit_df$kw)
+
+for (kw in kw_list) {
+  
+  # Nur Beiträge dieser KW
+  df_kw <- reddit_df %>% filter(kw == !!kw)
+  
+  # Ordner erstellen
+  folder_name <- paste0("KW_", kw)
+  dir_create(folder_name)
+  
+  # Jahr und Dateiname definieren
+  jahr_kw <- unique(df_kw$jahr)[1]
+  file_name <- paste0(folder_name, "/reddit_kw_", kw, "_", jahr_kw, ".csv")
+  
+  # Datei aktualisieren oder neu erstellen
+  if (file_exists(file_name)) {
+    existing <- read_csv(file_name, show_col_types = FALSE)
+    df_kw <- anti_join(df_kw, existing, by = "post_id")
+    combined <- bind_rows(existing, df_kw)
+  } else {
+    combined <- df_kw
+  }
+  
+  # Speichern
+  write_csv(combined, file_name)
+  cat("✅ Gespeichert oder aktualisiert:", file_name, "\n")
+}
+```
+
+```{r}
+head(reddit_df)
+```
